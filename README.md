@@ -37,7 +37,7 @@
 
 1. **Скачайте файл**
    ```bash
-   wget https://github.com/username/bot-monitor-dle/releases/latest/download/bot_monitor.php
+   wget https://github.com/Murkirpus/Bot-Monitor/releases/latest/download/bot_monitor.php
    ```
 
 2. **Загрузите на сервер**
