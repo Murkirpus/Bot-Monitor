@@ -199,6 +199,34 @@ class UniversalBotMonitor {
        }
    }
    
+   // ДОБАВИТЬ новую функцию для получения reverse DNS
+private function get_reverse_dns($ip) {
+    // Кэшируем результаты чтобы не делать много запросов
+    static $dns_cache = [];
+    
+    if (isset($dns_cache[$ip])) {
+        return $dns_cache[$ip];
+    }
+    
+    // Проверяем валидность IP
+    if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        $dns_cache[$ip] = null;
+        return null;
+    }
+    
+    // Делаем reverse DNS lookup с таймаутом
+    $hostname = @gethostbyaddr($ip);
+    
+    // Если hostname совпадает с IP, значит reverse DNS не найден
+    if ($hostname === $ip || $hostname === false) {
+        $dns_cache[$ip] = null;
+        return null;
+    }
+    
+    $dns_cache[$ip] = $hostname;
+    return $hostname;
+}
+   
    // 2. Добавить функцию показа страницы анализа нагрузки:
 private function show_bot_load_page() {
     $period = $_GET['period'] ?? '24';
@@ -1898,305 +1926,461 @@ if(file_exists(ENGINE_DIR . '/modules/bot_tracker.php')) {
    }
    
    private function show_stats_page() {
-       $period = $_GET['period'] ?? '7';
-       $period = in_array($period, ['1', '7', '30', '90']) ? $period : '7';
-       
-       $stats = $this->get_detailed_stats($period);
-       
-       ?>
+    $period = $_GET['period'] ?? '7';
+    $period = in_array($period, ['1', '7', '30', '90']) ? $period : '7';
+    
+    $stats = $this->get_detailed_stats($period);
+    
+    ?>
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-   <meta charset="utf-8">
-   <meta name="viewport" content="width=device-width, initial-scale=1">
-   <title>Bot Monitor - Подробная статистика</title>
-   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-   <style>
-       body { 
-           font-family: system-ui, sans-serif; 
-           margin: 0; 
-           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-           min-height: 100vh; 
-       }
-       .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-       .header { text-align: center; color: white; margin-bottom: 30px; }
-       .card { 
-           background: rgba(255,255,255,0.95); 
-           border-radius: 15px; 
-           padding: 25px; 
-           margin: 20px 0; 
-           box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
-       }
-       .controls { text-align: center; margin: 20px 0; }
-       .controls select, .controls a { 
-           padding: 8px 16px; 
-           margin: 0 5px; 
-           border-radius: 6px; 
-           text-decoration: none; 
-       }
-       .btn { 
-           background: #007cba; 
-           color: white; 
-           border: none; 
-           padding: 10px 20px; 
-           border-radius: 6px; 
-           cursor: pointer; 
-       }
-       .chart-container { height: 400px; margin: 20px 0; }
-       table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-       th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-       th { background: #f8f9fa; font-weight: 600; }
-       tr:hover { background: #f8f9fa; }
-       .back-link { text-align: center; margin: 20px 0; }
-       .back-link a { color: white; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 6px; }
-	   table a {
-    color: #007cba;
-    text-decoration: none;
-    transition: color 0.3s ease;
-}
-
-table a:hover {
-    color: #0056b3;
-    text-decoration: underline;
-}
-
-table a code {
-    background: #f8f9fa;
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bot Monitor - Подробная статистика</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { 
+            font-family: system-ui, sans-serif; 
+            margin: 0; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .card { 
+            background: rgba(255,255,255,0.95); 
+            border-radius: 15px; 
+            padding: 25px; 
+            margin: 20px 0; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1); 
+        }
+        .controls { text-align: center; margin: 20px 0; }
+        .controls select, .controls a { 
+            padding: 8px 16px; 
+            margin: 0 5px; 
+            border-radius: 6px; 
+            text-decoration: none; 
+        }
+        .btn { 
+            background: #007cba; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+        }
+        .chart-container { height: 400px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f8f9fa; font-weight: 600; }
+        tr:hover { background: #f8f9fa; }
+        .back-link { text-align: center; margin: 20px 0; }
+        .back-link a { color: white; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 6px; }
+        table a {
+            color: #007cba;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        table a:hover {
+            color: #0056b3;
+            text-decoration: underline;
+        }
+        table a code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        table a:hover code {
+            background: #e9ecef;
+        }
+        .ip-code {
+            background: #f8f9fa;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+		/* Добавить в существующие стили: */
+.hostname {
+    font-family: monospace;
+    font-size: 0.85em;
     padding: 2px 4px;
     border-radius: 3px;
 }
 
-table a:hover code {
-    background: #e9ecef;
+.hostname-legitimate {
+    background: #d4edda;
+    color: #155724;
 }
-   </style>
+
+.hostname-suspicious {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.hostname-unknown {
+    background: #f8f9fa;
+    color: #6c757d;
+}
+
+.ip-code {
+    background: #f8f9fa;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.9em;
+}
+
+/* Для мобильных устройств скрываем менее важные колонки */
+@media (max-width: 768px) {
+    .card table th:nth-child(5),
+    .card table td:nth-child(5),
+    .card table th:nth-child(6),
+    .card table td:nth-child(6) {
+        display: none;
+    }
+}
+    </style>
 </head>
 <body>
-   <div class="container">
-       <div class="header">
-           <h1>📊 Подробная статистика Bot Monitor</h1>
-           <div class="back-link">
-               <a href="bot_monitor.php">← Назад к главной</a>
-           </div>
-       </div>
-       
-       <div class="card">
-           <div class="controls">
-               <label>Период: </label>
-               <select onchange="changePeriod(this.value)">
-                   <option value="1" <?= $period == '1' ? 'selected' : '' ?>>Последний день</option>
-                   <option value="7" <?= $period == '7' ? 'selected' : '' ?>>Последняя неделя</option>
-                   <option value="30" <?= $period == '30' ? 'selected' : '' ?>>Последний месяц</option>
-                   <option value="90" <?= $period == '90' ? 'selected' : '' ?>>Последние 3 месяца</option>
-               </select>
-           </div>
-           
-           <div class="chart-container">
-               <canvas id="visitsChart"></canvas>
-           </div>
-       </div>
-       
-       <div class="card">
-           <h3>🏆 Топ поисковых ботов (за <?= $period ?> дн.)</h3>
-           <table>
-               <thead>
-                   <tr>
-                       <th>Поисковый бот</th>
-                       <th>Посещений</th>
-                       <th>Последнее посещение</th>
-                       <th>Процент</th>
-                   </tr>
-               </thead>
-               <tbody>
-                   <?php if ($stats['top_bots']): ?>
-                       <?php 
-                       $total = array_sum(array_column($stats['top_bots'], 'count'));
-                       foreach ($stats['top_bots'] as $bot): 
-                           $percent = $total > 0 ? round(($bot['count'] / $total) * 100, 1) : 0;
-                       ?>
-                       <tr>
-                           <td><strong><?= htmlspecialchars($bot['bot_name']) ?></strong></td>
-                           <td><?= number_format($bot['count']) ?></td>
-                           <td><?= date('d.m.Y H:i', strtotime($bot['last_visit'])) ?></td>
-                           <td><span style="color: #007cba; font-weight: bold;"><?= $percent ?>%</span></td>
-                       </tr>
-                       <?php endforeach; ?>
-                   <?php else: ?>
-                       <tr><td colspan="4" style="text-align: center; color: #6c757d;">Нет данных за выбранный период</td></tr>
-                   <?php endif; ?>
-               </tbody>
-           </table>
-       </div>
-       
-       <div class="card">
-    <h3>📄 Топ индексируемых страниц</h3>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Подробная статистика Bot Monitor</h1>
+            <div class="back-link">
+                <a href="bot_monitor.php">← Назад к главной</a>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="controls">
+                <label>Период: </label>
+                <select onchange="changePeriod(this.value)">
+                    <option value="1" <?= $period == '1' ? 'selected' : '' ?>>Последний день</option>
+                    <option value="7" <?= $period == '7' ? 'selected' : '' ?>>Последняя неделя</option>
+                    <option value="30" <?= $period == '30' ? 'selected' : '' ?>>Последний месяц</option>
+                    <option value="90" <?= $period == '90' ? 'selected' : '' ?>>Последние 3 месяца</option>
+                </select>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="visitsChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h3>🏆 Топ поисковых ботов (за <?= $period ?> дн.)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Поисковый бот</th>
+                        <th>Посещений</th>
+                        <th>Последнее посещение</th>
+                        <th>Процент</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($stats['top_bots']): ?>
+                        <?php 
+                        $total = array_sum(array_column($stats['top_bots'], 'count'));
+                        foreach ($stats['top_bots'] as $bot): 
+                            $percent = $total > 0 ? round(($bot['count'] / $total) * 100, 1) : 0;
+                        ?>
+                        <tr>
+                            <td><strong><?= htmlspecialchars($bot['bot_name']) ?></strong></td>
+                            <td><?= number_format($bot['count']) ?></td>
+                            <td><?= date('d.m.Y H:i', strtotime($bot['last_visit'])) ?></td>
+                            <td><span style="color: #007cba; font-weight: bold;"><?= $percent ?>%</span></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="4" style="text-align: center; color: #6c757d;">Нет данных за выбранный период</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h3>📄 Топ индексируемых страниц</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>URL</th>
+                        <th>Посещений ботами</th>
+                        <th>Уникальных ботов</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($stats['top_pages']): ?>
+                        <?php 
+                        // Получаем базовый URL сайта
+                        $base_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'];
+                        
+                        foreach ($stats['top_pages'] as $page): 
+                            // Формируем полный URL
+                            $full_url = $page['url'];
+                            if (strpos($full_url, 'http') !== 0) {
+                                // Если URL относительный, добавляем домен
+                                $full_url = $base_url . $full_url;
+                            }
+                            
+                            // Текст для отображения (обрезанный)
+                            $display_url = htmlspecialchars($page['url']);
+                            $is_truncated = strlen($page['url']) > 80;
+                            if ($is_truncated) {
+                                $display_url = htmlspecialchars(substr($page['url'], 0, 80)) . '...';
+                            }
+                        ?>
+                        <tr>
+                            <td>
+                                <a href="<?= htmlspecialchars($full_url) ?>" 
+                                   target="_blank" 
+                                   rel="noopener noreferrer"
+                                   style="text-decoration: none; color: #007cba;"
+                                   title="<?= htmlspecialchars($page['url']) ?>">
+                                    <code style="color: inherit;"><?= $display_url ?></code>
+                                </a>
+                            </td>
+                            <td><?= $page['visits'] ?></td>
+                            <td><?= $page['unique_bots'] ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="3" style="text-align: center; color: #6c757d;">Нет данных</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+    <h3>🌐 IP адреса ботов</h3>
     <table>
         <thead>
             <tr>
-                <th>URL</th>
-                <th>Посещений ботами</th>
-                <th>Уникальных ботов</th>
+                <th>IP адрес</th>
+                <th>Hostname (rDNS)</th>
+                <th>Бот</th>
+                <th>Посещений</th>
+                <th>Страниц</th>
+                <th>Первое посещение</th>
+                <th>Последнее посещение</th>
             </tr>
         </thead>
         <tbody>
-            <?php if ($stats['top_pages']): ?>
-                <?php 
-                // Получаем базовый URL сайта
-                $base_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://" . $_SERVER['HTTP_HOST'];
-                
-                foreach ($stats['top_pages'] as $page): 
-                    // Формируем полный URL
-                    $full_url = $page['url'];
-                    if (strpos($full_url, 'http') !== 0) {
-                        // Если URL относительный, добавляем домен
-                        $full_url = $base_url . $full_url;
-                    }
+            <?php if ($stats['top_ips']): ?>
+                <?php foreach ($stats['top_ips'] as $ip): 
+                    // Определяем легитимность бота по hostname
+                    $is_legitimate = false;
+                    $hostname_class = 'hostname-unknown';
+                    $hostname_title = 'Reverse DNS не найден';
                     
-                    // Текст для отображения (обрезанный)
-                    $display_url = htmlspecialchars($page['url']);
-                    $is_truncated = strlen($page['url']) > 80;
-                    if ($is_truncated) {
-                        $display_url = htmlspecialchars(substr($page['url'], 0, 80)) . '...';
+                    if ($ip['hostname']) {
+                        $hostname_lower = strtolower($ip['hostname']);
+                        
+                        // Проверяем легитимные домены поисковиков
+                        $legitimate_domains = [
+                            'googlebot.com' => 'Google',
+                            'google.com' => 'Google',
+                            'crawl.yahoo.net' => 'Yahoo',
+                            'search.msn.com' => 'Bing',
+                            'yandex.ru' => 'Yandex',
+                            'yandex.net' => 'Yandex',
+                            'yandex.com' => 'Yandex',
+                            'facebook.com' => 'Facebook',
+                            'baidu.com' => 'Baidu',
+                            'baidu.jp' => 'Baidu'
+                        ];
+                        
+                        foreach ($legitimate_domains as $domain => $search_engine) {
+                            if (strpos($hostname_lower, $domain) !== false) {
+                                $is_legitimate = true;
+                                $hostname_class = 'hostname-legitimate';
+                                $hostname_title = "Легитимный бот {$search_engine}";
+                                break;
+                            }
+                        }
+                        
+                        if (!$is_legitimate) {
+                            $hostname_class = 'hostname-suspicious';
+                            $hostname_title = 'Подозрительный hostname - может быть поддельный бот';
+                        }
                     }
                 ?>
                 <tr>
                     <td>
-                        <a href="<?= htmlspecialchars($full_url) ?>" 
-                           target="_blank" 
-                           rel="noopener noreferrer"
-                           style="text-decoration: none; color: #007cba;"
-                           title="<?= htmlspecialchars($page['url']) ?>">
-                            <code style="color: inherit;"><?= $display_url ?></code>
-                        </a>
+                        <code class="ip-code"><?= htmlspecialchars($ip['ip_address']) ?></code>
                     </td>
-                    <td><?= $page['visits'] ?></td>
-                    <td><?= $page['unique_bots'] ?></td>
+                    <td title="<?= $hostname_title ?>">
+                        <?php if ($ip['hostname']): ?>
+                            <span class="hostname <?= $hostname_class ?>">
+                                <?= htmlspecialchars($ip['hostname']) ?>
+                                <?php if ($is_legitimate): ?>
+                                    <span style="color: #28a745; margin-left: 5px;">✓</span>
+                                <?php elseif ($ip['hostname']): ?>
+                                    <span style="color: #ffc107; margin-left: 5px;">⚠</span>
+                                <?php endif; ?>
+                            </span>
+                        <?php else: ?>
+                            <span style="color: #6c757d; font-style: italic;">нет данных</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><strong><?= htmlspecialchars($ip['bot_name']) ?></strong></td>
+                    <td><?= number_format($ip['visits']) ?></td>
+                    <td><?= $ip['unique_pages'] ?></td>
+                    <td><?= date('d.m.Y H:i', strtotime($ip['first_visit'])) ?></td>
+                    <td><?= date('d.m.Y H:i', strtotime($ip['last_visit'])) ?></td>
                 </tr>
                 <?php endforeach; ?>
             <?php else: ?>
-                <tr><td colspan="3" style="text-align: center; color: #6c757d;">Нет данных</td></tr>
+                <tr><td colspan="7" style="text-align: center; color: #6c757d;">Нет данных</td></tr>
             <?php endif; ?>
         </tbody>
     </table>
 </div>
-   </div>
-   
-   <script>
-   function changePeriod(period) {
-       window.location.href = '?action=stats&period=' + period;
-   }
-   
-   // График посещений
-   const ctx = document.getElementById('visitsChart').getContext('2d');
-   const chartData = <?= json_encode($stats['chart_data']) ?>;
-   
-   // Группируем данные по ботам
-   const botData = {};
-   const dates = [...new Set(chartData.map(item => item.date))].sort();
-   
-   chartData.forEach(item => {
-       if (!botData[item.bot_name]) {
-           botData[item.bot_name] = {};
-       }
-       botData[item.bot_name][item.date] = parseInt(item.visits);
-   });
-   
-   const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF8C00', '#32CD32'];
-   const datasets = Object.keys(botData).map((bot, index) => ({
-       label: bot,
-       data: dates.map(date => botData[bot][date] || 0),
-       borderColor: colors[index % colors.length],
-       backgroundColor: colors[index % colors.length] + '20',
-       fill: false,
-       tension: 0.1
-   }));
-   
-   new Chart(ctx, {
-       type: 'line',
-       data: {
-           labels: dates,
-           datasets: datasets
-       },
-       options: {
-           responsive: true,
-           maintainAspectRatio: false,
-           plugins: {
-               title: {
-                   display: true,
-                   text: 'Активность ботов по дням'
-               },
-               legend: {
-                   position: 'top'
-               }
-           },
-           scales: {
-               y: {
-                   beginAtZero: true,
-                   title: {
-                       display: true,
-                       text: 'Количество посещений'
-                   }
-               },
-               x: {
-                   title: {
-                       display: true,
-                       text: 'Дата'
-                   }
-               }
-           }
-       }
-   });
-   </script>
+    </div>
+    
+    <script>
+    function changePeriod(period) {
+        window.location.href = '?action=stats&period=' + period;
+    }
+    
+    // График посещений
+    const ctx = document.getElementById('visitsChart').getContext('2d');
+    const chartData = <?= json_encode($stats['chart_data']) ?>;
+    
+    // Группируем данные по ботам
+    const botData = {};
+    const dates = [...new Set(chartData.map(item => item.date))].sort();
+    
+    chartData.forEach(item => {
+        if (!botData[item.bot_name]) {
+            botData[item.bot_name] = {};
+        }
+        botData[item.bot_name][item.date] = parseInt(item.visits);
+    });
+    
+    const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#FF8C00', '#32CD32'];
+    const datasets = Object.keys(botData).map((bot, index) => ({
+        label: bot,
+        data: dates.map(date => botData[bot][date] || 0),
+        borderColor: colors[index % colors.length],
+        backgroundColor: colors[index % colors.length] + '20',
+        fill: false,
+        tension: 0.1
+    }));
+    
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: dates,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Активность ботов по дням'
+                },
+                legend: {
+                    position: 'top'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Количество посещений'
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Дата'
+                    }
+                }
+            }
+        }
+    });
+    </script>
 </body>
 </html>
-       <?php
-   }
+    <?php
+}
    
    private function get_detailed_stats($period) {
-       // График данных
-       $chart_data = $this->db_super_query("
-           SELECT 
-               bot_name,
-               DATE(visit_time) as date,
-               COUNT(*) as visits
-           FROM `{$this->table_name}` 
-           WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
-           GROUP BY bot_name, DATE(visit_time)
-           ORDER BY date ASC
-       ", 1);
-       
-       // Топ ботов
-       $top_bots = $this->db_super_query("
-           SELECT 
-               bot_name,
-               COUNT(*) as count,
-               MAX(visit_time) as last_visit
-           FROM `{$this->table_name}` 
-           WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
-           GROUP BY bot_name
-           ORDER BY count DESC
-           LIMIT 15
-       ", 1);
-       
-       // Топ страниц
-       $top_pages = $this->db_super_query("
-           SELECT 
-               url,
-               COUNT(*) as visits,
-               COUNT(DISTINCT bot_name) as unique_bots
-           FROM `{$this->table_name}` 
-           WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
-           GROUP BY url
-           ORDER BY visits DESC
-           LIMIT 20
-       ", 1);
-       
-       return [
-           'chart_data' => $chart_data ?: [],
-           'top_bots' => $top_bots ?: [],
-           'top_pages' => $top_pages ?: []
-       ];
-   }
+    // График данных
+    $chart_data = $this->db_super_query("
+        SELECT 
+            bot_name,
+            DATE(visit_time) as date,
+            COUNT(*) as visits
+        FROM `{$this->table_name}` 
+        WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
+        GROUP BY bot_name, DATE(visit_time)
+        ORDER BY date ASC
+    ", 1);
+    
+    // Топ ботов
+    $top_bots = $this->db_super_query("
+        SELECT 
+            bot_name,
+            COUNT(*) as count,
+            MAX(visit_time) as last_visit
+        FROM `{$this->table_name}` 
+        WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
+        GROUP BY bot_name
+        ORDER BY count DESC
+        LIMIT 15
+    ", 1);
+    
+    // Топ страниц
+    $top_pages = $this->db_super_query("
+        SELECT 
+            url,
+            COUNT(*) as visits,
+            COUNT(DISTINCT bot_name) as unique_bots
+        FROM `{$this->table_name}` 
+        WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
+        GROUP BY url
+        ORDER BY visits DESC
+        LIMIT 20
+    ", 1);
+    
+    // Топ IP адресов ботов
+    $top_ips_raw = $this->db_super_query("
+        SELECT 
+            ip_address,
+            bot_name,
+            COUNT(*) as visits,
+            MIN(visit_time) as first_visit,
+            MAX(visit_time) as last_visit,
+            COUNT(DISTINCT url) as unique_pages
+        FROM `{$this->table_name}` 
+        WHERE visit_time >= DATE_SUB(NOW(), INTERVAL {$period} DAY)
+        GROUP BY ip_address, bot_name
+        ORDER BY visits DESC
+        LIMIT 50
+    ", 1);
+    
+    // Добавляем reverse DNS для каждого IP
+    $top_ips = [];
+    if ($top_ips_raw) {
+        foreach ($top_ips_raw as $ip_data) {
+            $ip_data['hostname'] = $this->get_reverse_dns($ip_data['ip_address']);
+            $top_ips[] = $ip_data;
+        }
+    }
+    
+    return [
+        'chart_data' => $chart_data ?: [],
+        'top_bots' => $top_bots ?: [],
+        'top_pages' => $top_pages ?: [],
+        'top_ips' => $top_ips ?: []
+    ];
+}
    
    private function api_endpoint() {
        header('Content-Type: application/json; charset=utf-8');
